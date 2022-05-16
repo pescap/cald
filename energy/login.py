@@ -28,7 +28,7 @@ class _it_counter(object):
         self._count += 1
         if self._store_residuals:
             self._residuals.append(np.linalg.norm(x))
-            print 'iteration -', self._count,"|| residual -", np.linalg.norm(x)
+            print('iteration -', self._count,"|| residual -", np.linalg.norm(x))
 
 
     @property
@@ -39,119 +39,8 @@ class _it_counter(object):
     def residuals(self):
         return self._residuals
 
-
-def assemble_singular_part(operator, distance=1):
-    """Assemble the singular part of an integral operator."""
-
-    from scipy.sparse import csc_matrix
-    from bempp.api.assembly.discrete_boundary_operator import SparseDiscreteBoundaryOperator
-
-
-
-    test_space = operator.dual_to_range
-    trial_space = operator.domain
-
-    test_dof_count = operator.dual_to_range.global_dof_count
-    trial_dof_count = operator.domain.global_dof_count 
-
-    # If the test and trial grid are different return a zero matrix
-
-    #if operator.domain.grid != operator.dual_to_range.grid:
-        #return SparseDiscreteBoundaryOperator(csc_matrix((test_dof_count, trial_dof_count)))
-
-    grid = operator.domain.grid
-
-    # Now get adjacent element pairs
-
-    vertex_to_element_matrix = grid.leaf_view.vertex_to_element_matrix
     
-    element_to_element_matrix = vertex_to_element_matrix.transpose().dot(vertex_to_element_matrix)
-
-    element_to_element_matrix = np.power(element_to_element_matrix, distance)
-
-    #element_to_element_matrix2 = np.dot(element_to_element_matrix,element_to_element_matrix)
-    nonzero_pairs = element_to_element_matrix.nonzero()
-    index_pairs = zip(nonzero_pairs[0], nonzero_pairs[1])
-
-    # Now get all pairs of basis functions who partially overlap via adjacent elements
-
-    all_test_trial_function_pairs = []
-
-    for pair in index_pairs:
-
-        test_element = grid.leaf_view.element_from_index(pair[0])
-        trial_element = grid.leaf_view.element_from_index(pair[1])
-
-        global_test_dofs = test_space.get_global_dofs(test_element)
-        global_trial_dofs = trial_space.get_global_dofs(trial_element)
-
-        for test_dof_index in global_test_dofs:
-            if test_dof_index > -1:
-                for trial_dof_index in global_trial_dofs:
-                    if trial_dof_index > -1:
-                        all_test_trial_function_pairs.append((test_dof_index, trial_dof_index))
-        
-    # Remove duplicates 
-    all_test_trial_function_pairs = list(set(all_test_trial_function_pairs))
-
-    # Now get all integraton element pairs associated 
-
-    all_integration_element_pairs = []
-
-    for function_pair in all_test_trial_function_pairs:
-
-        local_dofs = test_space.global_to_local_dofs(function_pair)[0]
-        test_local_dofs = local_dofs[0]
-        trial_local_dofs = local_dofs[1]
-
-        for test_dof in test_local_dofs:
-            for trial_dof in trial_local_dofs:
-                all_integration_element_pairs.append(
-                        (test_dof.entity_index, trial_dof.entity_index))
-
-     # Remove duplicates
-    all_integration_element_pairs = list(set(all_integration_element_pairs))
-
-    # Now compute all local dof interactions
-
-    assembler = operator.local_assembler
-
-    weak_forms = assembler.evaluate_local_weak_forms(all_integration_element_pairs)
-
-    # Create a dictionary
-
-    weak_form_lookup = dict(zip(all_integration_element_pairs, weak_forms))
-
-    # Now need to create the sparse matrix
-
-    data = np.zeros(len(all_test_trial_function_pairs), dtype=assembler.dtype)
-    row_indices = np.zeros(len(all_test_trial_function_pairs), dtype=np.int)
-    col_indices = np.zeros(len(all_test_trial_function_pairs), dtype=np.int)
-
-    #import ipdb; ipdb.set_trace()
-
-    for index, (test_index, trial_index) in enumerate(all_test_trial_function_pairs):
-
-        row_indices[index] = test_index
-        col_indices[index] = trial_index
-
-        # Get local dofs and dof_weights
-        local_dofs, weights = test_space.global_to_local_dofs([test_index, trial_index])
-        test_dofs, trial_dofs = local_dofs
-        test_weights, trial_weights = weights
-
-        for i, test_dof in enumerate(test_dofs):
-            for j, trial_dof in enumerate(trial_dofs):
-                element_pair = (test_dof.entity_index, trial_dof.entity_index)
-                data[index] += (weak_form_lookup[element_pair][test_dof.dof_index, trial_dof.dof_index] *
-                        np.conj(test_weights[i]) * np.conj(trial_weights[j]))
-
-    return SparseDiscreteBoundaryOperator(csc_matrix((data, (row_indices, col_indices)), 
-            shape=(test_dof_count, trial_dof_count)))
-
-
-
-def gmres(A, b, tol=1E-5, restart=None, maxiter=None, use_strong_form=False, return_residuals=False):
+def gmres(A, b, tol=1E-5, restart=None, H=None, solver = 'scipy', maxiter=None, use_strong_form=False, return_residuals=False):
     """Interface to the scipy.sparse.linalg.gmres function.
 
     This function behaves like the scipy.sparse.linalg.gmres function. But
@@ -189,9 +78,15 @@ def gmres(A, b, tol=1E-5, restart=None, maxiter=None, use_strong_form=False, ret
     callback = _it_counter(return_residuals)
 
     #bempp.api.log("Starting GMRES iteration")
+
     start_time = time.time()
-    x, info = scipy.sparse.linalg.gmres(A_op, b_vec,
-                                        tol=tol, restart=restart, maxiter=maxiter, callback=callback)
+    if solver == 'scipy':
+        x, info = scipy.sparse.linalg.gmres(A_op, b_vec,
+                                            tol=tol, restart=restart, maxiter=maxiter, callback=callback)
+    elif solver == 'pyamg':
+        from gmres import gmres
+        x, info = gmres(A_op, b_vec, H=H,
+                                            tol=tol, restrt=restart, maxiter=maxiter, callback=callback)
     end_time = time.time()
     #bempp.api.log("GMRES finished in {0} iterations and took {1:.2E} sec.".format(
     #    callback.count, end_time - start_time))

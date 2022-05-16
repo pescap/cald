@@ -131,7 +131,7 @@ b_rwg_space = bem.function_space(grid, "B-RWG", 0)
 b_snc_space = bem.function_space(grid, "B-SNC", 0)
 
 N = int(rwg_space.global_dof_count)
-print N ,'NDOF'
+#print N ,'NDOF'
 
 efie_none_ref = bem.operators.boundary.maxwell.electric_field(rwg_space,rwg_space, snc_space, kappa, parameters=parameters_dense)
 # define the operators for standard formulation
@@ -156,7 +156,7 @@ t0 = time.time()
 efie_none_wf = efie_none.weak_form()
 ta_none = time.time()-t0
 
-print 'assembly of Cald prec bi'
+print('assembly of Cald prec bi')
 t0 = time.time()
 efie_bc_sf = efie_bc.strong_form()
 tc_bi = time.time()-t0
@@ -169,7 +169,7 @@ tolerance = 1e-5
 restart = 200
 maxiter = 100000
 
-print "solver of bi scipy"
+print("solver of bi scipy")
 t0 = time.time()
 c_paul,  info_paul, res_paul  = gmres(efie_hyp_sf, rhs_hyp_paul, tol=tolerance, restart=restart, return_residuals=True, maxiter=maxiter)
 ts_bi = time.time()-t0
